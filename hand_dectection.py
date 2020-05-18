@@ -2,8 +2,9 @@ import cv2
 import numpy as np
 import math
 
-def capture_histogram(source):
-    cap = cv2.VideoCapture(source)
+HIST_FILE = 'hist.npy'
+
+def capture_histogram(cap):
     while True:
         _, frame = cap.read()
         frame = cv2.flip(frame, 1)
@@ -24,12 +25,12 @@ def capture_histogram(source):
             break
 
     cv2.destroyAllWindows()
-    cap.release()
     object_color_hsv = cv2.cvtColor(object_color, cv2.COLOR_BGR2HSV)
     object_hist = cv2.calcHist([object_color_hsv], [0, 1], None,
                                [12, 15], [0, 180, 0, 256])
 
     cv2.normalize(object_hist, object_hist, 0, 255, cv2.NORM_MINMAX)
+    np.save(HIST_FILE, object_hist)
     return object_hist
 
 def locate_object(frame, object_hist):
@@ -64,34 +65,30 @@ def detect_hand(frame, hist):
     return_value["masked"] = masked
     return_value["raw"] = raw
 
-    return return_value
-
     # # find the contours
-    # image, contours, _ = cv2.findContours(
-    #     detected_hand, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-    # palm_area = 0
-    # flag = None
-    # cnt = None
+    image, contours, _ = cv2.findContours(detected_hand, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    palm_area = 0
+    flag = None
+    cnt = None
 
-    # # find the largest contour
-    # for (i, c) in enumerate(contours):
-    #     area = cv2.contourArea(c)
-    #     if area > palm_area:
-    #         palm_area = area
-    #         flag = i
+    # find the largest contour
+    for (i, c) in enumerate(contours):
+        area = cv2.contourArea(c)
+        if area > palm_area:
+            palm_area = area
+            flag = i
 
-    # # we want our contour to have a minimum area of 10000
-    # # this number might be different depending on camera, distance of hand
-    # # from screen, etc.
-    # if flag is not None and palm_area > 10000:
-    #     cnt = contours[flag]
-    #     return_value["contours"] = cnt
-    #     cpy = frame.copy()
-    #     cv2.drawContours(cpy, [cnt], 0, (0, 255, 0), 2)
-    #     return_value["boundaries"] = cpy
-    #     return True, return_value
-    # else:
-    #     return False, return_value
+    # we want our contour to have a minimum area of 10000
+    # this number might be different depending on camera, distance of hand
+    # from screen, etc.
+    success = flag is not None and palm_area > 10000
+    if success:
+        cnt = contours[flag]
+        return_value["contours"] = cnt
+        cpy = frame.copy()
+        cv2.drawContours(cpy, [cnt], 0, (0, 255, 0), 2)
+        return_value["boundaries"] = cpy
+    return success, return_value
 
 
 def track_object(source, histogram):
@@ -106,24 +103,31 @@ def track_object(source, histogram):
         if key == ord('q'):
             break
 
-
 if __name__ == "__main__":
-    hist = capture_histogram(0)
-
     cap = cv2.VideoCapture(0)
+    try:
+        hist = np.load(HIST_FILE)
+    except FileNotFoundError:
+        hist = capture_histogram(cap)
+
     while True:
         ret, frame = cap.read()
         if not ret:
             break
-        hand = detect_hand(frame, hist)
+        frame = cv2.flip(frame, 1)
+        success, hand = detect_hand(frame, hist)
 
-        cv2.imshow("Raw", hand['raw'])
-        cv2.imshow("Enhanced Binary", hand['binary'])
-        cv2.imshow("Masked", hand['masked'])
+        for key, value in hand.items():
+            if key == 'contours':
+                continue
+            cv2.imshow(key, value)
 
-        k = cv2.waitKey(10)
-        if k == ord('q'):
+        key = cv2.waitKey(10)
+        if key == ord('q'):
             break
+        if key == ord('h'):
+            cv2.destroyAllWindows()
+            hist = capture_histogram(cap)
 
-cap.release()
-cv2.destroyAllWindows()
+    cap.release()
+    cv2.destroyAllWindows()
